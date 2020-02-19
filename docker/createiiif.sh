@@ -10,7 +10,7 @@ aws s3 sync s3://${SRC_BUCKET}/${DIR_PREFIX}/${ACCESS_DIR} ${ACCESS_DIR}
 # Fetch the CSV file
 aws s3 cp s3://${SRC_BUCKET}/${CSV_PATH}/${CSV_NAME} .
 # Generate the tiles
-ruby create_iiif_s3.rb ${CSV_NAME} ${ACCESS_DIR}/ ${DEST_URL} ${DEST_PREFIX} --upload_to_s3=${UPLOAD_BOOL}
+ruby create_iiif_s3.rb -m ${CSV_NAME} -i ${ACCESS_DIR}/ -b ${DEST_URL} -r ${DEST_PREFIX}
 # Put CSV files in the proper place
 cp ${CSV_NAME} tmp/${DEST_PREFIX}/${COLLECTION_NAME}/${CSV_NAME::-4}/
 # Upload generated tiles

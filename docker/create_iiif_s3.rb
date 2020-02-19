@@ -1,5 +1,11 @@
+#!/usr/bin/env ruby
+
+# A generator for IIIF compatible image tiles and metadata
+# Try "./create_iiif_s3.rb -h"
+#
 require 'iiif_s3'
 require 'open-uri'
+require 'optparse'
 require_relative '../../lib/iiif_s3/manifest_override'
 IiifS3::Manifest.prepend IiifS3::ManifestOverride
 
@@ -27,16 +33,14 @@ def get_metadata(csv_url, id)
       end
       puts "No matching Identifier found"
     end
-  rescue
-    puts "No CSV file found"
+  rescue StandardError => e
+    puts "An error occurred processing #{csv_url}: #{e.message}"
   end
 end
 
-def add_image(file, id)
-  # name should be either as numerical or identifier_numerical,
-  # such as Ms1990_025_Per_Awd_B001_F001_006_001.tif or 001.tif
+def add_image(file, id, idx)
   name = File.basename(file, File.extname(file))
-  page_num = name.split("_").last.to_i
+  page_num = idx + 1
   label, description = get_metadata(@csv_url, id)
   obj = {
     "path" => "#{file}",
@@ -46,43 +50,94 @@ def add_image(file, id)
     "page_number" => page_num,
     "is_document" => false,
     "description" => description,
-    "attribution" => "Special Collections, University Libraries, Virginia Tech",
-  }  
+    "attribution" => "Special Collections, University Libraries, Virginia Tech"
+  }
 
   obj["section"] = "p#{page_num}"
   obj["section_label"] = "Page #{page_num}"
   @data.push IiifS3::ImageRecord.new(obj)
 end
 
-if ARGV.length != 5
-  puts "Usage: ruby create_iiif_s3.rb csv_metadata_file image_folder_path manifest_base_path manifest_root_folder --upload_to_s3=false"
-  exit
-end
+options = {}
+optparse = OptionParser.new do |parser|
+  parser.banner = "Usage: create_iiif_s3.rb -m csv_metadata_file -i image_folder_path -b manifest_base_path -r manifest_root_folder -[no-]u"
 
-@csv_url = ARGV[0]
-csv_name = File.basename(@csv_url)
-collection_id = csv_name.scan(/Ms\d{4}_\d{3}/)[0]
-# path to the image files end with "obj_id/image.tif"
-image_folder_path = ARGV[1]
-@input_folder = image_folder_path.slice(image_folder_path.index("#{collection_id}")..-1)
-# read files in the input_folder
-@image_files = Dir[image_folder_path + "*"].sort
+  # short option, long option, description of the option
+  parser.on("-m", "--manifest_file File", "Manifest CSV file") do |manifest_file|
+    options[:manifest_file] = manifest_file
+  end
+  parser.on("-i", "--image_folder Path", "Path to image folder") do |img_folder|
+    options[:image_folder] = img_folder
+  end
+  parser.on("-b", "--base_path Path", "Base path of manifest file") do |base_path|
+    options[:base_url] = base_path
+  end
+  parser.on("-r", "--root_folder Path", "Path to root folder") do |root_folder|
+    options[:root_folder] = root_folder
+  end
+  options[:upload_to_s3] = false
+  parser.on('-u', '--[no-]upload_to_s3', 'Upload manifest/tiles to s3') do
+    options[:upload_to_s3] = true
+  end
+  parser.on_tail("-h", "--help", "Prints this help") do
+    puts parser
+    exit
+  end
+end.parse!
+
+unless @csv_url = options[:manifest_file]
+  puts "Require manifest_file!"
+  puts "Try './create_iiif_s3.rb -h'"
+  exit
+else
+  begin
+    csv_name = File.basename(@csv_url)
+    # look for collection id with pattern, e.g., Ms1990_025
+    collection_id = csv_name.scan(/Ms\d{4}_\d{3}/)[0]
+    unless image_folder_path = options[:image_folder]
+      puts "Require path to image folder!"
+      puts "Try './create_iiif_s3.rb -h'"
+      exit
+    else
+      begin
+        # path to the image files end with "obj_id/image.tif"
+        @input_folder = image_folder_path.slice(image_folder_path.index("#{collection_id}")..-1)
+        # sort image files in the image folder
+        @image_files = Dir[image_folder_path + "*"].sort
+      rescue StandardError => e
+        puts "An error occurred processing image folder at #{image_folder_path}: #{e.message}"
+      end
+    end
+  rescue StandardError => e
+      puts "An error occurred process manifest file #{@csv_url}: #{e.message}"
+  end
+end
 
 # Setup Temporary stores
 @data = []
 # Set up configuration variables
 opts = {}
-opts[:base_url] = ARGV[2]
+unless opts[:base_url] = options[:base_url]
+  puts "Require base path to manifest file!"
+  puts "Try './create_iiif_s3.rb -h'"
+  exit
+end
 opts[:image_directory_name] = "tiles"
 opts[:output_dir] = "tmp"
 opts[:variants] = { "reference" => 600, "access" => 1200}
-# get the flag if upload to S3 or not
-args = Hash[ ARGV.join(' ').scan(/--?([^=\s]+)(?:=(\S+))?/) ]
-opts[:upload_to_s3] = (args["upload_to_s3"] == 'true' ? true : false)
+# get the option if upload to S3, absence is false, presence is true
+opts[:upload_to_s3] = options[:upload_to_s3]
+puts "upload to s3: #{opts[:upload_to_s3]}"
 opts[:image_types] = [".jpg", ".tif", ".jpeg", ".tiff"]
 opts[:document_file_types] = [".pdf"]
 # prefix uses manifest_root_folder
-opts[:prefix] = "#{ARGV[3]}/#{@input_folder.split('/')[0..-3].join('/')}"
+unless options[:root_folder]
+  puts "Require path to root folder"
+  puts "Try './create_iiif_s3.rb -h'"
+  exit
+else
+  opts[:prefix] = "#{options[:root_folder]}/#{@input_folder.split('/')[0..-3].join('/')}"
+end
 
 iiif = IiifS3::Builder.new(opts)
 @config = iiif.config
@@ -96,8 +151,8 @@ create_directories(img_dir)
 
 id = @input_folder.split("/")[-2]
 
-for image_file in @image_files
-  add_image(image_file, id)
+@image_files.each_with_index do |image_file, idx|
+  add_image(image_file, id, idx)
 end
 
 iiif.load(@data)
