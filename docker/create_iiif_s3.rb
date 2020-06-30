@@ -50,7 +50,6 @@ def add_image(file, id, idx)
     "page_number" => page_num,
     "is_document" => false,
     "description" => description,
-    "attribution" => "Special Collections, University Libraries, Virginia Tech"
   }
 
   obj["section"] = "p#{page_num}"
