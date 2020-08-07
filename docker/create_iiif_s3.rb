@@ -8,6 +8,8 @@ require 'open-uri'
 require 'optparse'
 require_relative '../../lib/iiif_s3/manifest_override'
 IiifS3::Manifest.prepend IiifS3::ManifestOverride
+require_relative 'lib/iiif_s3/image_tile_override'
+IiifS3::ImageTile.prepend IiifS3::ImageTileOverride
 
 # Create directories on local disk for manifests/tiles to upload them to S3
 def create_directories(path)
